@@ -1,6 +1,7 @@
 use std::collections::{HashMap, LinkedList};
 use std::string::ToString;
 use std::{thread, env};
+use std::time;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use threadpool::ThreadPool;
@@ -11,20 +12,27 @@ struct Results {
     bindings: LinkedList<HashMap<String, HashMap<String, String>>>
 }
 
+/// Structure of the SPARQLResult for SELECT queries
 #[derive(Deserialize)]
 struct JsonResult {
     results: Results
 }
 
+/// Structure of a SPARQLResult for ASK queries
 #[derive(Deserialize)]
 struct JsonAskResult {
     boolean: bool
 }
 
+const CHECK_TRIPLE_STORES: [&'static str; 2] = ["https://dbpedia.org/sparql", "https://query.wikidata.org/sparql"];
 const SELECT_QUERY: &str = "PREFIX qado: <http://purl.com/qado/ontology.ttl#> select \
 ?query ?text where {?question a qado:Question ; qado:hasSparqlQuery ?query .?query a qado:Query ;\
 qado:hasQueryText ?text .} ORDER BY ?query";
 
+/// Evaluating all found queries
+///
+/// # Arguments
+/// * `bindings`: bindings of the SPARQLResult+JSON object returned from the QADO triplestore
 fn check_queries(bindings: LinkedList<HashMap<String, HashMap<String, String>>>) {
     let threads = match thread::available_parallelism() {
         Ok(threads) => threads.get(),
@@ -48,7 +56,15 @@ fn check_queries(bindings: LinkedList<HashMap<String, HashMap<String, String>>>)
     pool.join();
 }
 
-fn generate_insert_query(query_id: String, endpoint: &String, property: &str, valid: bool,
+/// Create the insert query for the evaluation results of a SPARQL query
+///
+/// # Arguments
+/// * `query_id` - identifier of the evaluated SPARQL query object
+/// * `endpoint` - HTTP endpoint of the knowledge graph related to the query
+/// * `property` - property name of the evaluation result
+/// * `valid` - **false** if the knowledge returned an empty response else **true**
+/// * `update_triple_store` - HTTP endpoint of the evaluated QADO dataset
+fn generate_insert_query(query_id: String, endpoint: &str, property: &str, valid: bool,
                          update_triple_store: String) {
     let time = chrono::offset::Utc::now().format("%FT%T");
 
@@ -70,14 +86,21 @@ fn generate_insert_query(query_id: String, endpoint: &String, property: &str, va
     client.post(update_triple_store).query(&[("update", query)]).send().expect("Query failed!");
 }
 
+/// Validates a SPARQL query and stores the results in the corresponding QADO triplestore
+///
+/// # Arguments
+/// * `query_id` - identifier for the evaluated qado:Query object
+/// * `query_text` - SPARQL query
+/// * `update_triple_store` - HTTP endpoint for posting UPDATE queries for the QADO triplestore
 fn evaluate_triple_stores(query_id: String, query_text: String, update_triple_store: String) {
     let mut updated: bool = false;
-    let check_triple_stores = LinkedList::from([
-        "https://dbpedia.org/sparql".to_string(), "https://query.wikidata.org/sparql".to_string()]);
 
-    for triplestore in check_triple_stores.iter() {
-        let client = Client::new();
-        let response = client.get(triplestore).query(
+    // test all listed triplestores
+    for triplestore in CHECK_TRIPLE_STORES.iter() {
+        let client = Client::builder().timeout(time::Duration::new(90, 0)).
+            build().expect("Client build failed");
+
+        let response = client.get(triplestore.to_string()).query(
             &[("query", query_text.as_str())]).header("Accept", "application/json"
         ).send();
 
