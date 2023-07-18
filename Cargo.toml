@@ -1,0 +1,13 @@
+[package]
+name = "qado_sparql_validator"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = {version = "^0.11.17", features = ["blocking", "json"]}
+serde = {version = "^1.0.160", features = ["derive"]}
+serde_json = "^1.0.96"
+chrono = "^0.4.24"
+threadpool = "^1.8.1"
