@@ -1,0 +1,27 @@
+name: Docker Image CI
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build the Docker image
+        run: docker build -t wseresearch/qado-sparql-validator:latest .
+      - name: Docker Login
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Tag docker image version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: docker tag wseresearch/qado-sparql-validator:latest "wseresearch/qado-sparql-validator:${{ github.ref_name }}"
+      - name: Push latest docker image
+        if: startsWith(github.ref, 'refs/tags/')
+        run: docker push wseresearch/qado-sparql-validator:latest
+      - name: Push docker image version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: docker push "wseresearch/qado-sparql-validator:${{ github.ref_name }}"
