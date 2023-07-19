@@ -68,13 +68,11 @@ fn generate_insert_query(query_id: String, endpoint: &str, property: &str, valid
                          update_triple_store: String) {
     let time = chrono::offset::Utc::now().format("%FT%T");
 
-    let sparql_query_check = format!("{query_id}-check");
-
     let mut query = format!("PREFIX qado: <http://purl.com/qado/ontology.ttl#> \
     PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> \
-    insert {{ <{query_id}> qado:hasSPARQLCheck <{sparql_query_check}> . \
-    <{sparql_query_check}> a qado:SPARQLCheck . \
-    <{sparql_query_check}> qado:{property} \"{time}\"^^xsd:dateTime .");
+    insert {{ <{query_id}> qado:hasSPARQLCheck [ \
+        a qado:SPARQLCheck ; \
+        qado:{property} \"{time}\"^^xsd:dateTime ].");
 
     if valid {
         query = format!("{query} <{query_id}> qado:correspondsToKnowledgeGraph <{endpoint}> .");
