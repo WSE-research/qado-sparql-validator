@@ -49,6 +49,7 @@ fn check_queries(bindings: LinkedList<HashMap<String, HashMap<String, String>>>)
 
         pool.execute(move|| {
             let args: Vec<String> = env::args().collect();
+            println!("{}", query_id);
             evaluate_triple_stores(query_id, query_text, args[2].clone());
         });
     }
