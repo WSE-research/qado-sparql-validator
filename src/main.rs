@@ -1,11 +1,22 @@
 use std::collections::{HashMap, LinkedList};
 use std::string::ToString;
-use std::{thread, env};
+use std::thread;
 use std::time;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use threadpool::ThreadPool;
 use chrono;
+use clap::Parser;
+use indicatif::ProgressBar;
+use std::sync::{Arc, Mutex};
+
+#[derive(Parser)]
+struct Arguments {
+    /// URL of the HTTP endpoint of your QADO triplestore
+    fetch_url: String,
+    /// URL of the HTTP endpoint used to update your QADO triplestore
+    update_url: String
+}
 
 #[derive(Deserialize)]
 struct Results {
@@ -33,7 +44,8 @@ qado:hasQueryText ?text .} ORDER BY ?query";
 ///
 /// # Arguments
 /// * `bindings`: bindings of the SPARQLResult+JSON object returned from the QADO triplestore
-fn check_queries(bindings: LinkedList<HashMap<String, HashMap<String, String>>>) {
+fn check_queries(bindings: LinkedList<HashMap<String, HashMap<String, String>>>,
+                 update_url: String) {
     let threads = match thread::available_parallelism() {
         Ok(threads) => threads.get(),
         Err(_) => 1
@@ -42,19 +54,23 @@ fn check_queries(bindings: LinkedList<HashMap<String, HashMap<String, String>>>)
     println!("Using {} threads...", threads);
 
     let pool = ThreadPool::new(threads);
+    let bar_arc = Arc::new(Mutex::new(ProgressBar::new(bindings.len() as u64)));
 
     for binding in bindings.iter() {
         let query_id = binding["query"]["value"].clone();
         let query_text = binding["text"]["value"].clone();
+        let update_triple_store = update_url.clone();
+
+        let bar_handle = Arc::clone(&bar_arc);
 
         pool.execute(move|| {
-            let args: Vec<String> = env::args().collect();
-            println!("{}", query_id);
-            evaluate_triple_stores(query_id, query_text, args[2].clone());
+            bar_handle.lock().unwrap().inc(1);
+            evaluate_triple_stores(query_id, query_text, update_triple_store);
         });
     }
 
     pool.join();
+    bar_arc.lock().unwrap().finish();
 }
 
 /// Create the insert query for the evaluation results of a SPARQL query
@@ -164,22 +180,13 @@ fn evaluate_triple_stores(query_id: String, query_text: String, update_triple_st
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args = Arguments::parse();
 
-    if args.len() == 3 {
-        let fetch_triple_store = args[1].as_str();
+    let client = Client::new();
+    let response = client.get(args.fetch_url).header(
+        "Accept", "application/json").query(&[("query", SELECT_QUERY)]).send().unwrap();
 
-        let client = Client::new();
-        let response = client.get(fetch_triple_store).header(
-            "Accept", "application/json").query(&[("query", SELECT_QUERY)]).send().unwrap();
+    let body: JsonResult = response.json().unwrap();
 
-        let body: JsonResult = response.json().unwrap();
-
-        check_queries(body.results.bindings);
-    }
-    else {
-        println!("Run this command by calling qado_expander [FETCH_URL] [UPDATE_URL]");
-        println!("FETCH_URL\t-\tHTTP endpoint of your QADO triplestore to fetch the SPARQL queries");
-        println!("UPDATE_URL\t-\tHTTP endpoint of your QADO triplestore to post SPARQL UPDATE queries");
-    }
+    check_queries(body.results.bindings, args.update_url);
 }
