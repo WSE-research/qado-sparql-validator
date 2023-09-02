@@ -1,7 +1,6 @@
 use std::collections::{HashMap, LinkedList};
 use std::string::ToString;
 use std::thread;
-use std::time;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use threadpool::ThreadPool;
@@ -9,6 +8,7 @@ use chrono;
 use clap::Parser;
 use indicatif::ProgressBar;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Parser)]
 struct Arguments {
@@ -36,9 +36,9 @@ struct JsonAskResult {
 }
 
 const CHECK_TRIPLE_STORES: [&'static str; 2] = ["https://dbpedia.org/sparql", "https://query.wikidata.org/sparql"];
-const SELECT_QUERY: &str = "PREFIX qado: <http://purl.com/qado/ontology.ttl#> select \
-?query ?text where {?question a qado:Question ; qado:hasSparqlQuery ?query .?query a qado:Query ;\
-qado:hasQueryText ?text .} ORDER BY ?query";
+const SELECT_QUERY: &str = "PREFIX qado: <http://purl.com/qado/ontology.ttl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+select ?query ?text where {?question a ?class ; qado:hasSparqlQuery ?query . ?class rdfs:subClassOf qado:Question .\
+?query a qado:Query ; qado:hasQueryText ?text .} ORDER BY ?query";
 
 /// Evaluating all found queries
 ///
@@ -112,7 +112,7 @@ fn evaluate_triple_stores(query_id: String, query_text: String, update_triple_st
 
     // test all listed triplestores
     for triplestore in CHECK_TRIPLE_STORES.iter() {
-        let client = Client::builder().timeout(time::Duration::new(90, 0)).
+        let client = Client::builder().timeout(Duration::new(90, 0)).
             build().expect("Client build failed");
 
         let response = client.get(triplestore.to_string()).query(
@@ -182,11 +182,30 @@ fn evaluate_triple_stores(query_id: String, query_text: String, update_triple_st
 fn main() {
     let args = Arguments::parse();
 
-    let client = Client::new();
+    let client = Client::builder().timeout(Duration::from_secs(60)).build().unwrap();
     let response = client.get(args.fetch_url).header(
-        "Accept", "application/json").query(&[("query", SELECT_QUERY)]).send().unwrap();
+        "Accept", "application/sparql-results+json").query(&[("query", SELECT_QUERY)]).send();
 
-    let body: JsonResult = response.json().unwrap();
+    match response {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                let body_json : Result<JsonResult, _> = resp.json();
 
-    check_queries(body.results.bindings, args.update_url);
+                match body_json {
+                    Ok(body) => {
+                        check_queries(body.results.bindings, args.update_url);
+                    }
+                    Err(e) => {
+                        println!("{}", e);
+                    }
+                }
+            }
+            else {
+                println!("{}", resp.status());
+            }
+        },
+        Err(err) => {
+            println!("{}", err);
+        }
+    }
 }
